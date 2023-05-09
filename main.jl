@@ -8,7 +8,80 @@ using LaTeXStrings
 include("averaged_multipole_decomposition.jl")
 include("common_params.jl")
 
-## test 1
+################################ test 1: is the optimized code working? ######################################
+# We compute <Fnn> (average nth mode of the scattered field when the incident field is such that gN = δn,N)
+# This quantity can be computed in two different ways:
+# 1 - use the optimized code for the computation of the effective T-matrix nth mode 
+# 2 - still with gN = δn,N ,  the average scattered field satisfies
+# ...                  <us>(x,0) = <Fnn> Hn(k x), for x>2R.
+# ...  <Fnn> can then be extracted from the average scattered field. 
+# Note: in Monte Carlo simulations, the formula above is corrupted by other modes of the scattered field (which 
+# vanishes after convergence of the average). A possible refinement is to compute the nth Fourier mode of the computed <us>.
+
+
+    basis_order = 3
+    basis_field_order = 1
+
+    nb_iterations = 100
+    kws_MC = Dict(
+        :radius_big_cylinder=>radius_big_cylinder
+        ,:basis_order=> basis_order
+        ,:basis_field_order=> basis_field_order
+        ,:nb_iterations_max=> nb_iterations
+        ,:nb_iterations_step=> nb_iterations
+        ,:prec=>1e-2
+    )
+
+    ω = 0.5
+    k = ω2k(ω)
+    Fopt = sample_effective_t_matrix(ω, host_medium, sp_MC;kws_MC...)
+
+# Here is the naive method using <us>
+    Fnaive = [ComplexF64[] for _ in 1:basis_field_order+1]
+    progress = Progress(basis_field_order+1)
+    x = 1.5*radius_big_cylinder
+   
+    @time Threads.@threads for mode=0:basis_field_order
+       source = mode_source(mode)
+       for _ = 1:nb_iterations
+        particles = renew_particle_configurations(sp_MC,radius_big_cylinder)
+        sim = FrequencySimulation(particles,source);
+        result = run(sim,[[x,0.0]],[ω];only_scattered_waves=true,basis_order=basis_order)
+        Fnn = result.field[1][1]/besselh(mode,k*x)
+        push!(Fnaive[mode+1],Fnn)
+       end
+       next!(progress)
+    end 
+
+    Fnaive = naive_sample_effective_t_matrix(ω, host_medium, sp_MC;
+        radius_big_cylinder=radius_big_cylinder, 
+        basis_order=basis_order, 
+        basis_field_order=basis_field_order,
+        nb_iterations=nb_iterations)
+    
+
+    mode = 1
+    hr = histogram(real.(Fnaive[mode+1]),label="naive")
+    hr = histogram!(real.(Fopt[mode+1]),label="optimal")
+
+    hi = histogram(imag.(Fnaive[mode+1]),label="naive")
+    hi = histogram!(imag.(Fopt[mode+1]),label="optimal")
+
+    plot(hr,hi)
+    err = abs(mean(Fopt[mode+1]) - mean(Fnaive[mode+1]))
+    plot!(title=["mode="*string(mode),"image"])
+
+    mean(Fopt[2])
+    mean(Fnaive[2])
+### END OF TEST 1
+
+
+
+
+
+
+    result = run(sim,region,[ω];only_scattered_waves=true,basis_order=basis_order)
+
 # radial source, compute F0 for different frequencies
 
     basis_order = 10

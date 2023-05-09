@@ -161,11 +161,15 @@ function sample_effective_t_matrix(ω::Number, host_medium::PhysicalMedium, sp::
             rθ = [cartesian_to_radial_coordinates(origin(p)) for p in particles]
             n_particles = length(particles)
             J = [
-                besselj(n,k*rθ[i][1]) 
-            for n = 0:(basis_order+basis_field_order),i=1:n_particles]
+                    besselj(n,k*rθ[i][1]) 
+                        for n = 0:(basis_order+basis_field_order),i=1:n_particles
+                ]
+
             M_bessel = [
-                (-1)^n*J[abs(n)+1,i]*exp(im*n*rθ[i][2]) 
-            for n=-basis_order-basis_field_order:basis_order+basis_field_order,i=1:n_particles]
+
+                            (-1)^n*J[abs(n)+1,i]*exp(im*n*rθ[i][2]) 
+                                for n=-basis_order-basis_field_order:basis_order+basis_field_order,i=1:n_particles
+                        ]
 
             # Computation of all bessel functions - this can be optimized following selected_modes 
             
@@ -235,6 +239,25 @@ function sample_effective_t_matrix(ω::Number, host_medium::PhysicalMedium, sp::
 end
 
 
+function naive_sample_effective_t_matrix(ω::Number, host_medium::PhysicalMedium, sp::Specie;
+    radius_big_cylinder=10.0::Float64, basis_order=3::Int, basis_field_order=0::Int,
+    nb_iterations=1000::Int) 
+
+    k = ω/host_medium.c
+    F = [ComplexF64[] for _ in 1:basis_field_order+1]
+    x = 1.5*radius_big_cylinder
+   
+    for mode=0:basis_field_order
+       source = mode_source(mode)
+       for _ = 1:nb_iterations
+        particles = renew_particle_configurations(sp,radius_big_cylinder)
+        sim = FrequencySimulation(particles,source);
+        result = run(sim,[[x,0.0]],[ω];only_scattered_waves=true,basis_order=basis_order)
+        Fnn = result.field[1][1]/besselh(mode,k*x)
+        push!(F[mode+1],Fnn)
+       end
+    end 
+end
 
 mutable struct MonteCarloResult
     ω::Float64
