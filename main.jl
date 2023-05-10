@@ -8,7 +8,7 @@ using LaTeXStrings
 include("averaged_multipole_decomposition.jl")
 include("common_params.jl")
 
-################################ test 1: is the optimized code working? ######################################
+################################ test 1: is the optimized code working? (No so far) ######################################
 # We compute <Fnn> (average nth mode of the scattered field when the incident field is such that gN = δn,N)
 # This quantity can be computed in two different ways:
 # 1 - use the optimized code for the computation of the effective T-matrix nth mode 
@@ -20,9 +20,9 @@ include("common_params.jl")
 
 
     basis_order = 3
-    basis_field_order = 1
+    basis_field_order = 3
 
-    nb_iterations = 100
+    nb_iterations = 5000
     kws_MC = Dict(
         :radius_big_cylinder=>radius_big_cylinder
         ,:basis_order=> basis_order
@@ -32,35 +32,28 @@ include("common_params.jl")
         ,:prec=>1e-2
     )
 
-    ω = 0.5
+    ω = 1.0
     k = ω2k(ω)
-    Fopt = sample_effective_t_matrix(ω, host_medium, sp_MC;kws_MC...)
+    @time Fopt = sample_effective_t_matrix(ω, host_medium, sp_MC;kws_MC...);
 
 # Here is the naive method using <us>
     Fnaive = [ComplexF64[] for _ in 1:basis_field_order+1]
     progress = Progress(basis_field_order+1)
-    x = 1.5*radius_big_cylinder
+    x = 5*radius_big_cylinder
    
     @time Threads.@threads for mode=0:basis_field_order
        source = mode_source(mode)
        for _ = 1:nb_iterations
         particles = renew_particle_configurations(sp_MC,radius_big_cylinder)
         sim = FrequencySimulation(particles,source);
-        result = run(sim,[[x,0.0]],[ω];only_scattered_waves=true,basis_order=basis_order)
-        Fnn = result.field[1][1]/besselh(mode,k*x)
+        result = run(sim,[[x,0.0]],[ω];basis_order=basis_order) # this is the total field
+        Fnn = (result.field[1][1] - source.field([x,0.0],ω))/besselh(mode,k*x)
         push!(Fnaive[mode+1],Fnn)
        end
        next!(progress)
     end 
 
-    Fnaive = naive_sample_effective_t_matrix(ω, host_medium, sp_MC;
-        radius_big_cylinder=radius_big_cylinder, 
-        basis_order=basis_order, 
-        basis_field_order=basis_field_order,
-        nb_iterations=nb_iterations)
-    
-
-    mode = 1
+    mode = 3
     hr = histogram(real.(Fnaive[mode+1]),label="naive")
     hr = histogram!(real.(Fopt[mode+1]),label="optimal")
 
@@ -68,20 +61,201 @@ include("common_params.jl")
     hi = histogram!(imag.(Fopt[mode+1]),label="optimal")
 
     plot(hr,hi)
-    err = abs(mean(Fopt[mode+1]) - mean(Fnaive[mode+1]))
-    plot!(title=["mode="*string(mode),"image"])
 
-    mean(Fopt[2])
-    mean(Fnaive[2])
+    mean(Fopt[mode+1])
+    mean(Fnaive[mode+1])
 ### END OF TEST 1
 
 
+###################################### TEST 2: Is the theory correct (YES!) #############################################
+# Here we check that if the incident field is a mode source of order N, only the mode N of <us> is non trivial
+
+basis_order = 3
+basis_field_order = 5
+
+nb_iterations = 5000
+ω = 0.2
+input_mode = 4
+F = mode_analysis(input_mode, ω, host_medium, sp_MC;
+                radius_big_cylinder=radius_big_cylinder, 
+                basis_order=basis_order, 
+                basis_field_order=basis_field_order,
+                nb_iterations=nb_iterations)
+
+mean.(F)
+##END TEST 2
+
+
+############################### TEST 3: are mode_analysis and naive approach matching? (YES!) ##################################
+
+basis_order = 3
+nb_iterations = 5000
+ω = 0.5
+input_mode = 1
+basis_field_order = input_mode
+F = mode_analysis(input_mode, ω, host_medium, sp_MC;
+                radius_big_cylinder=radius_big_cylinder, 
+                basis_order=basis_order, 
+                basis_field_order=basis_field_order,
+                nb_iterations=nb_iterations)[input_mode+1]
+
+Fnaive = naive_sample_effective_t_matrix(ω, host_medium, sp_MC;
+    radius_big_cylinder=radius_big_cylinder, 
+    basis_order=basis_order, 
+    basis_field_order=basis_field_order,
+    nb_iterations=nb_iterations)[input_mode+1]
+
+hr = histogram(real.(Fnaive),label="naive")
+hr = histogram!(real.(F),label="modal")
+
+hi = histogram(imag.(Fnaive),label="naive")
+hi = histogram!(imag.(F),label="modal")
+
+plot(hr,hi)
+mean(F)
+mean(Fnaive)
+# END TEST 3
+
+
+################### TEST 4: are mode_analysis and optimal1_mode_analysis approach matching? (YES!) #############################
+
+basis_order = 3
+nb_iterations = 5000
+ω = 0.5
+input_mode = 1
+basis_field_order = input_mode
+F = mode_analysis(input_mode, ω, host_medium, sp_MC;
+                radius_big_cylinder=radius_big_cylinder, 
+                basis_order=basis_order, 
+                basis_field_order=basis_field_order,
+                nb_iterations=nb_iterations)[input_mode+1]
+
+Fopt1 = optimal1_mode_analysis(input_mode, ω, host_medium, sp_MC;
+    radius_big_cylinder=radius_big_cylinder, 
+    basis_order=basis_order, 
+    nb_iterations=nb_iterations)
+
+hr = histogram(real.(Fopt1),label="modal opt1")
+hr = histogram!(real.(F),label="modal")
+
+hi = histogram(imag.(Fopt1),label="modal opt1")
+hi = histogram!(imag.(F),label="modal")
+
+plot(hr,hi)
+mean(F)
+mean(Fopt1)
+## END TEST 4
+
+
+################### TEST 5: are optimal1_mode_analysis and optimal2_mode_analysis matching? #############################
+# Answer is yes! meaning that all the major optimisation tricks used in the function sample_effective_t_matrix are valid.
+basis_order = 3
+nb_iterations = 5000
+ω = 1.5
+input_mode = 0
+basis_field_order = input_mode
+Fopt2 = optimal2_mode_analysis(input_mode, ω, host_medium, sp_MC;
+                radius_big_cylinder=radius_big_cylinder, 
+                basis_order=basis_order, 
+                basis_field_order=basis_field_order,
+                nb_iterations=nb_iterations)
+
+Fopt1 = optimal1_mode_analysis(input_mode, ω, host_medium, sp_MC;
+    radius_big_cylinder=radius_big_cylinder, 
+    basis_order=basis_order, 
+    nb_iterations=nb_iterations)
+
+hr = histogram(real.(Fopt1),label="modal opt1")
+hr = histogram!(real.(Fopt2),label="modal opt2")
+
+hi = histogram(imag.(Fopt1),label="modal opt1")
+hi = histogram!(imag.(Fopt2),label="modal opt2")
+
+plot(hr,hi)
+mean(Fopt2)
+mean(Fopt1)
+## END TEST 5
+
+################### TEST 6: Is the function sample_effective_t_matrix working? ######################
+
+basis_order = 3
+nb_iterations = 5000
+ω = 1.5
+basis_field_order = 3
+@time Fopt2 = [optimal2_mode_analysis(input_mode, ω, host_medium, sp_MC;
+                radius_big_cylinder=radius_big_cylinder, 
+                basis_order=basis_order, 
+                basis_field_order=basis_field_order,
+                nb_iterations=nb_iterations) for input_mode = 0:basis_field_order];
+
+kws_MC = Dict(
+    :radius_big_cylinder=>radius_big_cylinder
+    ,:basis_order=> basis_order
+    ,:basis_field_order=> basis_field_order
+    ,:nb_iterations_max=> nb_iterations
+    ,:nb_iterations_step=> nb_iterations
+    ,:prec=>1e-2
+)
+
+@time Fmain = sample_effective_t_matrix(ω, host_medium, sp_MC;kws_MC...);
+
+mode = 1
+hr = histogram(real.(Fmain[mode+1]),label="main")
+hr = histogram!(real.(Fopt2[mode+1]),label="modal optimal2")
+
+hi = histogram(imag.(Fmain[mode+1]),label="main")
+hi = histogram!(imag.(Fopt2[mode+1]),label="modal optimal2")
+
+plot(hr,hi)
+mean(Fopt2[mode+1])
+mean(Fmain[mode+1])
+## END TEST 6
+
+
+###################### TEST 7: convergence of the function ##########
+# We check that the convergence criteria fixed in the function are robust
 
 
 
 
-    result = run(sim,region,[ω];only_scattered_waves=true,basis_order=basis_order)
+########################## Test: Compare naive approach with effective approach ##############
 
+basis_order = 5
+basis_field_order = 2
+nb_iterations = 5000
+Ω = collect(0.1:0.2:1.0) # frqs
+μ = complex(zeros(basis_field_order+1, length(Ω)))
+progress = Progress(length(Ω))
+@time Threads.@threads for i=1:length(Ω)
+    ω = Ω[i]
+    μ[:,i] = mean.(
+        naive_sample_effective_t_matrix(ω, host_medium, sp_MC;
+            radius_big_cylinder=radius_big_cylinder, 
+            basis_order=basis_order, 
+            basis_field_order=basis_field_order,
+            nb_iterations=nb_iterations))
+    next!(progress)
+end 
+
+kws_EF = Dict(
+    :radius_big_cylinder=>radius_big_cylinder
+    ,:basis_order=> basis_order
+    ,:basis_field_order=> basis_field_order
+)
+
+T = complex(zeros(2basis_field_order+1,length(Ω)));
+T0 = complex(zeros(2basis_field_order+1,length(Ω)));
+
+progress = Progress(length(Ω))
+@time Threads.@threads for i=1:length(Ω)
+    ω = Ω[i]
+    kstar, wavemode = effective_sphere_wavenumber(ω,[sp_EF],host_medium;
+    radius_big_cylinder=20.0,basis_order=basis_order);
+    N,D = t_matrix_num_denom(kstar,wavemode;basis_field_order=basis_field_order);
+    T[:,i] =  (- vec(sum(N,dims=1)./sum(D,dims=1)))
+    T0[:,i] = (- N[1+basis_order,:]./D[1+basis_order,:])
+end
+## END TEST 
 # radial source, compute F0 for different frequencies
 
     basis_order = 10
