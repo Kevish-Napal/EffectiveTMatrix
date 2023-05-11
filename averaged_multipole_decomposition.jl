@@ -25,10 +25,11 @@ in [0; basis_field_order]
 
 # This function is basically a for loop on parameter input_mode appearing in function optimal2_mode_analysis 
 # with elementary additional optimization. For each configuration of particles,
-# all the required bessel functions are computed at once in M_bessel. The matrix
-# V appearing in the function optimal2_mode_analysis select the appropriate bloc of M_bessel according to the mode computed.
+# all the required bessel functions are computed at once in blocs_V. The matrix
+# V appearing in the function optimal2_mode_analysis selects the appropriate bloc of blocs_V according to the mode computed.
 # Finally the stop criteria of computing each modes are set independently (this is why basis_field_order is updated after 
 # each loops). I still need to check if this is required or not, for the moment it is difficult to set a convergence criteria. 
+# note that a mode is assumed to be zero as soon as smaller than 1e-8, the code then stops iterating on this mode.
 function sample_effective_t_matrix(ω::Number, host_medium::PhysicalMedium, sp::Specie;
     radius_big_cylinder=10.0::Float64, basis_order=10::Int, basis_field_order=0::Int,
     nb_iterations_max=5000::Int,nb_iterations_step=200::Int,prec=1e-1::Float64) 
@@ -42,12 +43,7 @@ function sample_effective_t_matrix(ω::Number, host_medium::PhysicalMedium, sp::
     F = [ComplexF64[] for _ in 0:basis_field_order]
 
     # To estimate convergence of each modes, we keep track of number of iterations of each of them:
-    total_iterations = [0 for _ in 0:basis_field_order]
-    
-    μ = complex(zeros(basis_field_order+1))
-    σ_r = zeros(basis_field_order+1)
-    σ_i = zeros(basis_field_order+1)
-    
+    total_iterations = 0;  
 
     initial_basis_field_order = basis_field_order
     select_modes = trues(basis_field_order+1)
@@ -55,15 +51,24 @@ function sample_effective_t_matrix(ω::Number, host_medium::PhysicalMedium, sp::
     continue_crit() = any(select_modes) && maximum(total_iterations) < nb_iterations_max
     
     # confidence interval level 95% is [m-1.96σ/√n ; m+1.96σ/√n]
-    # we have [1.96σ/√nb_iterations < prec] => μ = ;empirical_mean ± precision] 
-    mode_continue_crit(m,s_r,s_i,n,prec) = (1.96*s_r/sqrt(n) > prec || 1.96*s_i/sqrt(n) > prec) && abs(m) > 1e-8
-
+    # we have [1.96σ/√nb_iterations < prec*|m|] => m = empirical_mean ± prec*|m|] 
+    # mode_continue_crit(m,s_r,s_i,n,prec) = (1.96*s_r/sqrt(n) > abs(real(m))*prec || 1.96*s_i/sqrt(n) > abs(imag(m))*prec) && abs(m) > 1e-8
+    # the function below updates select_modes accordingly
+    function update_running_modes!()
+        for mode=0:basis_field_order
+            if select_modes[mode+1]
+                m = mean(F[mode+1]) # can be computed iteratively and stored to optimize
+                s_r = std(real.(F[mode+1]); mean=real(m))
+                s_i = std(imag.(F[mode+1]); mean=imag(m))
+                select_modes[mode+1] = (1.96*s_r/sqrt(total_iterations) > abs(real(m))*prec || 1.96*s_i/sqrt(total_iterations) > abs(imag(m))*prec) && abs(m) > 1e-8
+            end
+        end
+        if any(select_modes)
+            basis_field_order = maximum(collect(0:initial_basis_field_order)[select_modes])
+        end
+    end
 
     while continue_crit()
-
-        println("iteration:\n",total_iterations)
-        println("modes still running:\n", select_modes)
-
         for _ in 1:nb_iterations_step
 
             particles = renew_particle_configurations(sp,radius_big_cylinder)
@@ -98,10 +103,7 @@ function sample_effective_t_matrix(ω::Number, host_medium::PhysicalMedium, sp::
                 if  select_modes[input_mode_index]
 
                     inds = (basis_field_order-input_mode+1):(basis_field_order-input_mode+2*basis_order+1)
-                    V .= blocs_V[inds,:]  
-                    # V = [besselj(n,k*rθ[i][1])*exp(im*n*rθ[i][2]) 
-                            # for n = (input_mode+basis_order):-1:(input_mode-basis_order), i=1:n_particles]
-                
+                    V .= blocs_V[inds,:]                  
                     
                     # reshape and multiply by t-matrix to get the scattering coefficients
                     a .= reshape((S + I) \ reduce(vcat,V),2*basis_order+1,n_particles)
@@ -114,41 +116,17 @@ function sample_effective_t_matrix(ω::Number, host_medium::PhysicalMedium, sp::
                     push!(F[input_mode_index],F_step)
                     
                 end
-            end                                                      # end mode loop
-        end                                                          # end iteration step
+            end # mode loop                                                      
+        end # iteration step
        
-        # recompute mean values and stdm for extended vector Fn (more realisations)
-        for input_mode = 0:basis_field_order # optimal when this loop comes after renewing particles
-            input_mode_index = input_mode+1
-            if select_modes[input_mode_index]
+        total_iterations += nb_iterations_step
+        update_running_modes!()
 
-                total_iterations[input_mode_index] += nb_iterations_step
-                # println(total_iterations)
+        println("nb iterations:",total_iterations)
+        println("modes still running:", select_modes,"\n")
+    end # while
 
-                m = mean(F[input_mode_index])
-                μ[input_mode_index] = m
-                M_σ = F[input_mode_index].-m                     
-        
-                s_r = sqrt.(mean((real.(M_σ).^2)))
-                σ_r[input_mode_index] = s_r 
-                
-                s_i = sqrt.(mean((imag.(M_σ).^2)))
-                σ_i[input_mode_index] = s_i  
-
-
-                select_modes[input_mode_index] = mode_continue_crit(m,s_r,s_i,total_iterations[input_mode_index],prec)
-            end
-        end
-        if select_modes[1]
-            basis_field_order = maximum(collect(0:initial_basis_field_order)[select_modes])
-        end
-    end       
-                                                           # end while
-    if initial_basis_field_order >= 1
-        μ = vcat(reverse(μ[2:end]),μ)
-    end
-
-    return F   # MonteCarloResult(ω,sp,radius_big_cylinder,μ,σ_r+im*σ_i,total_iterations)
+    return F
 end
 
 
