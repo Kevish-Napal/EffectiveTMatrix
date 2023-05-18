@@ -8,7 +8,7 @@ using LaTeXStrings
 include("averaged_multipole_decomposition.jl")
 include("common_params.jl")
 
-################################ test 1: is the optimized code working? (No so far) ######################################
+################################ test 1: is the optimized code working? (YES!) ######################################
 # We compute <Fnn> (average nth mode of the scattered field when the incident field is such that gN = δn,N)
 # This quantity can be computed in two different ways:
 # 1 - use the optimized code for the computation of the effective T-matrix nth mode 
@@ -147,7 +147,7 @@ mean(Fopt1)
 ## END TEST 4
 
 
-################### TEST 5: are optimal1_mode_analysis and optimal2_mode_analysis matching? #############################
+################### TEST 5: are optimal1_mode_analysis and optimal2_mode_analysis matching? (YES!) #############################
 # Answer is yes! meaning that all the major optimisation tricks used in the function sample_effective_t_matrix are valid.
 basis_order = 3
 nb_iterations = 5000
@@ -176,7 +176,7 @@ mean(Fopt2)
 mean(Fopt1)
 ## END TEST 5
 
-################### TEST 6: Is the function sample_effective_t_matrix working? ######################
+################### TEST 6: Is the function sample_effective_t_matrix working? (YES) ######################
 
 basis_order = 3
 nb_iterations = 5000
@@ -212,50 +212,90 @@ mean(Fmain[mode+1])
 ## END TEST 6
 
 
-###################### TEST 7: convergence of the function ##########
-# We check that the convergence criteria fixed in the function are robust
+###################### TEST 7: convergence of the function (YES!) ##########
+# We check that the convergence criteria fixed in the function sample_effective_t_matrix is robust
+# note: prec in the arguments is relative precision
 
+basis_order = 3
+nb_iterations = 1000
+ω = .3
+basis_field_order = 5
 
-
-
-########################## Test: Compare naive approach with effective approach ##############
-
-basis_order = 5
-basis_field_order = 2
-nb_iterations = 5000
-Ω = collect(0.1:0.2:1.0) # frqs
-μ = complex(zeros(basis_field_order+1, length(Ω)))
-progress = Progress(length(Ω))
-@time Threads.@threads for i=1:length(Ω)
-    ω = Ω[i]
-    μ[:,i] = mean.(
-        naive_sample_effective_t_matrix(ω, host_medium, sp_MC;
-            radius_big_cylinder=radius_big_cylinder, 
-            basis_order=basis_order, 
-            basis_field_order=basis_field_order,
-            nb_iterations=nb_iterations))
-    next!(progress)
-end 
-
-kws_EF = Dict(
+kws_MC = Dict(
     :radius_big_cylinder=>radius_big_cylinder
     ,:basis_order=> basis_order
     ,:basis_field_order=> basis_field_order
+    ,:nb_iterations_max=> nb_iterations
+    ,:nb_iterations_step=> nb_iterations
+    ,:prec=>1e-2
 )
 
-T = complex(zeros(2basis_field_order+1,length(Ω)));
-T0 = complex(zeros(2basis_field_order+1,length(Ω)));
+@time Fmain = sample_effective_t_matrix(ω, host_medium, sp_MC;kws_MC...);
 
-progress = Progress(length(Ω))
-@time Threads.@threads for i=1:length(Ω)
-    ω = Ω[i]
-    kstar, wavemode = effective_sphere_wavenumber(ω,[sp_EF],host_medium;
-    radius_big_cylinder=20.0,basis_order=basis_order);
-    N,D = t_matrix_num_denom(kstar,wavemode;basis_field_order=basis_field_order);
-    T[:,i] =  (- vec(sum(N,dims=1)./sum(D,dims=1)))
-    T0[:,i] = (- N[1+basis_order,:]./D[1+basis_order,:])
+
+
+kws_MC_conv = Dict(
+    :radius_big_cylinder=>radius_big_cylinder
+    ,:basis_order=> basis_order
+    ,:basis_field_order=> basis_field_order
+    ,:nb_iterations_max=> 5000
+    ,:nb_iterations_step=> 100
+    ,:prec=>1e-2
+)
+
+@time Fmain_conv = sample_effective_t_matrix(ω, host_medium, sp_MC;kws_MC_conv...);
+# END TEST 7
+
+
+########################## TEST 8: convergence with respect to basis_order small ω (YES!) #######################################
+
+ω = 0.1
+basis_field_order = 5
+Fstability_low_ω = [ComplexF64[] for _ in 0:basis_field_order]
+for basis_order = 0:10
+    kws_MC = Dict(
+        :radius_big_cylinder=>radius_big_cylinder
+        ,:basis_order=> basis_order
+        ,:basis_field_order=> basis_field_order
+        ,:nb_iterations_max=> 1000
+        ,:nb_iterations_step=> 100
+        ,:prec=>5e-2
+    )
+
+    push!.(Fstability_low_ω,mean.(sample_effective_t_matrix(ω, host_medium, sp_MC;kws_MC...)))
 end
-## END TEST 
+
+pr = plot(real.(Fstability_low_ω))
+pim = plot(imag.(Fstability_low_ω))
+plot(pr,pim)
+## END TEST 8
+
+
+########################## TEST 9: convergence with respect to basis_order big ω (YES!) #######################################
+# note that precision has to be small enough to see the convergence
+ω = 1.0
+basis_field_order = 5
+Fstability_high_ω = [ComplexF64[] for _ in 0:basis_field_order]
+for basis_order = 0:10
+    kws_MC = Dict(
+        :radius_big_cylinder=>radius_big_cylinder
+        ,:basis_order=> basis_order
+        ,:basis_field_order=> basis_field_order
+        ,:nb_iterations_max=> 5000
+        ,:nb_iterations_step=> 100
+        ,:prec=>1e-2
+    )
+
+    push!.(Fstability_high_ω,mean.(sample_effective_t_matrix(ω, host_medium, sp_MC;kws_MC...)))
+end
+
+pr = plot(real.(Fstability_high_ω));
+pim = plot(imag.(Fstability_high_ω));
+plot(pr,pim)
+## END TEST 9
+
+########################## Test: Compare naive approach with effective approach ##############
+
 # radial source, compute F0 for different frequencies
 
     basis_order = 10
