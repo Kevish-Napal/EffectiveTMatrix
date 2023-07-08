@@ -87,47 +87,20 @@ function t_matrix_num_denom(kstar,wavemode;basis_field_order)
     return Matrix_Num, Matrix_Denom
 end
 
-# main function to compute effective T-matrix
+# T-matrix is - Matrix_Num/Matrix_Denom
 function t_matrix(ω::T,effective_cylinder::Material,outer_medium::Acoustic{T,2};
     basis_order=10::Integer,basis_field_order=10::Integer,include_terms=basis_order::Int) where T <: AbstractFloat
 
     radius_big_cylinder = effective_cylinder.shape.radius
     micro = effective_cylinder.microstructure
     species = micro.species
-#    rs = outer_radius.(species)
-
-#    R = effective_sphere.shape.radius 
-#    k=ω/outer_medium.c
-
-    # Check for material properties that don't make sense or haven't been implemented
-#    for sp in species
-#        check_material(sp.particle, outer_medium)
-#    end
 
     kstar, wavemode =  effective_sphere_wavenumber(ω,species,outer_medium ;
     basis_order= basis_order,radius_big_cylinder=radius_big_cylinder)
 
+    N, D = t_matrix_num_denom(kstar,wavemode;basis_field_order = basis_field_order)
 
-#    numer(m,R) = k * diffbesselj(m, R*k) * besselj(m, R*kstar) - kstar * besselj(m, R*k)*diffbesselj(m, R*kstar)
-#    denom(m,R) = k * diffhankelh1(m, R*k) * besselj(m, R*kstar) - kstar * hankelh1(m, R*k)*diffbesselj(m, R*kstar)
-   
-#    Nn = [sum(
-#        numer(i[1]-1-input_basis_order-n,R-rs[i[2]]) *
-#        wavemode.eigenvectors[i] *
-#        number_density(species[i[2]])
-#    for i in CartesianIndices(wavemode.eigenvectors))
-#        for n = -output_basis_order:output_basis_order]
-
-#    Dn = [sum(
-#        denom(i[1]-1-input_basis_order-n,R-rs[i[2]]) *
-#        wavemode.eigenvectors[i] *
-#        number_density(species[i[2]])
-#    for i in CartesianIndices(wavemode.eigenvectors))
-#        for n = -output_basis_order:output_basis_order]
-
-   N, D = t_matrix_num_denom(kstar,wavemode;basis_field_order = basis_field_order)
-
-   return - vec(sum(N[basis_order+1-include_terms:basis_order+1+include_terms,:],dims=1) ./ sum(D[basis_order+1-include_terms:basis_order+1+include_terms,:],dims=1))
+    return - vec(sum(N[basis_order+1-include_terms:basis_order+1+include_terms,:],dims=1) ./ sum(D[basis_order+1-include_terms:basis_order+1+include_terms,:],dims=1))
 end
 
 

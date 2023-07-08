@@ -169,7 +169,8 @@ function MC_write(MC_vec::Vector{MonteCarloResult},file_path::String)
         end
 end
 
-function MC_read(file_path::String)
+function MC_read(data_folder::Int=1)
+    file_path = pwd()*"/Data/"*string(data_folder)*"/MC.csv"
     file = CSV.File(file_path; types=Dict(:c_particle => ComplexF64)) 
     MC_vec=Vector{MonteCarloResult}()
     for i = 1:length(file)
@@ -252,7 +253,8 @@ function MCtemp_write(MC_vec::Vector{MonteCarloResultTemp},file_path::String)
         end
 end
 
-function MCtemp_read(file_path::String)
+function MCtemp_read(data_folder::Int=1)
+    file_path = pwd()*"/Data/"*string(data_folder)*"/realisations/MCtemp.csv"
     file = CSV.File(file_path; types=Dict(:c_particle => ComplexF64)) 
     MCtemp_vec=Vector{MonteCarloResultTemp}()
     for i = 1:length(file)
@@ -272,6 +274,23 @@ function MCtemp_read(file_path::String)
                 )
     end
     return MCtemp_vec
+end
+
+function load_parameters(data_folder::Int=1)
+    file_path = pwd()*"/Data/"*string(data_folder)*"/MC.csv"
+    file = CSV.File(file_path; types=Dict(:c_particle => ComplexF64)) 
+    i = 1 # parameters of first element of MC_vec in the file
+
+    particle = Particle(Acoustic(2; ρ=file.ρ_particle[i], c=file.c_particle[i]),Circle(file.particle_radius[i]))
+    sp_MC = Specie(particle; volume_fraction = file.volume_fraction[i],separation_ratio=file.separation_ratio[i]) 
+        
+    ω = file.ω[i]
+    radius_big_cylinder = file.R[i]
+    basis_order = file.basis_order[i]
+    basis_field_order = file.basis_field_order[i]
+    sp_EF = sp_MC_to_EF(sp_MC,radius_big_cylinder)
+    
+    return ω, radius_big_cylinder, basis_order, basis_field_order, sp_MC, sp_EF
 end
 
 
@@ -344,6 +363,9 @@ function save(MCtemp_vec::Vector{MonteCarloResultTemp},description::String,all_d
     MCtemp_write(MCtemp_vec,realisations_path*"/MCtemp.csv")
 end
 
+function delete()
+
+end
 
 function Base.show(io::IO,MC::MonteCarloResult)
     basis_field_order = length(MC.μ)-1
